@@ -5,7 +5,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Optional,
     Tuple,
     Union,
@@ -127,30 +126,24 @@ class TraversalAdapter:
 
 
 class Edge:
-    DIRECTION = Literal["bi-dir", "in", "out"]
-    direction: DIRECTION
+    """Represents an edge to all nodes with the given key/value incoming."""
     key: str
     value: Any
 
-    def __init__(self, direction: DIRECTION, key: str, value: Any) -> None:
-        self.direction = direction
+    def __init__(self, key: str, value: Any) -> None:
         self.key = key
         self.value = value
 
     def __str__(self) -> str:
-        return f"{self.direction}:{self.key}:{self.value}"
+        return f"{self.key}:{self.value}"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Edge):
             return NotImplemented
-        return (
-            self.direction == other.direction
-            and self.key == other.key
-            and self.value == other.value
-        )
+        return (self.key == other.key and self.value == other.value)
 
     def __hash__(self) -> int:
-        return hash((self.direction, self.key, self.value))
+        return hash((self.key, self.value))
 
 
 class DocumentCache:
@@ -185,21 +178,21 @@ class DocumentCache:
 class GraphTraversalRetriever(BaseRetriever):
     store: TraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
+    _edges: List[Tuple[str, str]]
     start_k: int = Field(default=4)
     max_depth: int = Field(default=4)
-    _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         for edge in self.edges:
             if isinstance(edge, str):
-                self._edge_lookup[edge] = edge
+                self._edges.append((edge, edge))
             elif (
                 isinstance(edge, tuple)
                 and len(edge) == 2
                 and all(isinstance(item, str) for item in edge)
             ):
-                self._edge_lookup[edge[0]] = edge[1]
+                self._edges.append(edge)
             else:
                 raise ValueError(
                     "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
@@ -401,11 +394,11 @@ class GraphTraversalRetriever(BaseRetriever):
 
         return doc_cache.get_by_document_ids(ids=visited_ids)
 
-    def _get_edges(self, direction: Edge.DIRECTION, key: str, value: Any) -> set[Edge]:
+    def _get_edges(self, target_key: str, value: Any) -> set[Edge]:
         if isinstance(value, str):
-            return {Edge(direction=direction, key=key, value=value)}
+            return {Edge(key=target_key, value=value)}
         elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-            return {Edge(direction=direction, key=key, value=item) for item in value}
+            return {Edge(key=target_key, value=item) for item in value}
         else:
             msg = (
                 "Expected a string or an iterable of"
@@ -415,29 +408,10 @@ class GraphTraversalRetriever(BaseRetriever):
 
     def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
         outgoing_edges = set()
-        for edge in self.edges:
-            if isinstance(edge, str):
-                if edge in doc.metadata:
-                    outgoing_edges.update(
-                        self._get_edges(
-                            direction="bi-dir", key=edge, value=doc.metadata[edge]
-                        )
-                    )
-            elif (
-                isinstance(edge, tuple)
-                and len(edge) == 2
-                and all(isinstance(item, str) for item in edge)
-            ):
-                if edge[0] in doc.metadata:
-                    outgoing_edges.update(
-                        self._get_edges(
-                            direction="out", key=edge[0], value=doc.metadata[edge[0]]
-                        )
-                    )
-            else:
-                raise ValueError(
-                    "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
-                )
+        for source_key, target_key in self._edges:
+            outgoing_edges.update(
+                self._get_edges(target_key, value=doc.metadata[source_key])
+            )
         return outgoing_edges
 
     def _gather_outgoing_edges(
@@ -473,7 +447,7 @@ class GraphTraversalRetriever(BaseRetriever):
     def _get_metadata_filter(
         self,
         metadata: dict[str, Any] | None = None,
-        outgoing_edge: Edge | None = None,
+        edge: Edge | None = None,
     ) -> dict[str, Any]:
         """Builds a metadata filter to search for document
 
@@ -484,15 +458,11 @@ class GraphTraversalRetriever(BaseRetriever):
         Returns:
             The document metadata ready for insertion into the database
         """
-        if outgoing_edge is None:
+        if edge is None:
             return metadata or {}
 
         metadata_filter = {} if metadata is None else metadata.copy()
-        if outgoing_edge.direction == "bi-dir":
-            metadata_filter[outgoing_edge.key] = outgoing_edge.value
-        elif outgoing_edge.direction == "out":
-            in_key = self._edge_lookup[outgoing_edge.key]
-            metadata_filter[in_key] = outgoing_edge.value
+        metadata_filter[edge.key] = edge.value
 
         return metadata_filter
 
