@@ -13,11 +13,12 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 from pytest import FixtureRequest
 
-from langchain_community.retrievers import GraphTraversalRetriever
-from langchain_community.retrievers.graph_traversal import (
+from langchain_community.retrievers.generic_graph_traversal import (
     AstraTraversalAdapter,
     CassandraTraversalAdapter,
     ChromaTraversalAdapter,
+    EagerNodeSelector,
+    GenericGraphTraversalRetriever,
     OpenSearchTraversalAdapter,
     TraversalAdapter,
 )
@@ -310,9 +311,10 @@ def test_traversal(
         vector_store_type=vector_store_type,
     )
 
-    retriever = GraphTraversalRetriever(
+    retriever = GenericGraphTraversalRetriever(
         store=vector_store_adapter,
         edges=[("outgoing", "incoming"), "keywords"],
+        node_selector_factory = EagerNodeSelector.factory(),
         start_k=2,
         max_depth=2,
     )
@@ -356,9 +358,10 @@ class TestGraphTraversal:
             vector_store_type=vector_store_type,
         )
 
-        retriever = GraphTraversalRetriever(
+        retriever = GenericGraphTraversalRetriever(
             store=vector_store_adapter,
             edges=[("out", "in"), "tag"],
+            node_selector_factory = EagerNodeSelector.factory(),
             max_depth=2,
             start_k=2,
         )
@@ -391,9 +394,10 @@ class TestGraphTraversal:
             vector_store_type=vector_store_type,
         )
 
-        retriever = GraphTraversalRetriever(
+        retriever = GenericGraphTraversalRetriever(
             store=vector_store_adapter,
             edges=[("out", "in"), "tag"],
+            node_selector_factory = EagerNodeSelector.factory(),
             max_depth=2,
             start_k=2,
         )
